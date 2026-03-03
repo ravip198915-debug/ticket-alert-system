@@ -123,11 +123,15 @@ if send_button and ticket_file and master_file:
         st.error("Enter Bot Token")
         st.stop()
 
+    tickets = pd.read_excel(ticket_file)
+    engineers = pd.read_excel(master_file)
+
     success = 0
     failed = 0
     sent_log = []
 
     progress = st.progress(0)
+    total_engineers = len(engineers)
 
     for i, eng_row in engineers.iterrows():
 
@@ -140,44 +144,100 @@ if send_button and ticket_file and master_file:
 
         taluk_tickets = tickets[tickets["Taluk"] == taluk]
 
+        # ===============================
+        # CASE 1 → NO TICKETS
+        # ===============================
         if taluk_tickets.empty:
-            continue
 
-        msg = f"🕒 {datetime.now().strftime('%d %B %Y | %I:%M %p')}\n\n"
-        msg += f"🚨 OPEN TICKETS\n\n👨‍🔧 {eng_name}\n📍 {taluk}\n\n"
+            msg = (
+                f"🕒 {datetime.now().strftime('%d %B %Y | %I:%M %p')}\n\n"
+                f"✅ TICKET STATUS UPDATE\n\n"
+                f"👨‍🔧 {eng_name}\n"
+                f"📍 {taluk}\n\n"
+                f"🎉 No Tickets at Present!!\n\n"
+                f"All systems functioning normally.\n"
+                f"Keep up the good work 👏"
+            )
 
-        for _, row in taluk_tickets.iterrows():
-            msg += f"🆔 {row.get('Ticket Number','')}\n"
-            msg += f"⚠ {row.get('Priority','')}\n"
-            msg += "-----------------\n"
+            ticket_count = 0
 
+        # ===============================
+        # CASE 2 → OPEN TICKETS
+        # ===============================
+        else:
+
+            msg = (
+                f"🕒 {datetime.now().strftime('%d %B %Y | %I:%M %p')}\n\n"
+                f"🚨 OPEN TICKETS\n\n"
+                f"👨‍🔧 {eng_name}\n"
+                f"📍 {taluk}\n"
+                f"📊 Total Tickets: {len(taluk_tickets)}\n\n"
+            )
+
+            for _, row in taluk_tickets.iterrows():
+                msg += (
+                    f"🆔 {row.get('Ticket Number','')}\n"
+                    f"⚠ {row.get('Priority','')}\n"
+                    f"📂 {row.get('Sub Category','')}\n"
+                    f"📂 {row.get('Problem Reported','')}\n"
+                    "-----------------\n"
+                )
+
+            ticket_count = len(taluk_tickets)
+
+        # ===============================
+        # SEND TELEGRAM MESSAGE
+        # ===============================
         response = send_telegram(chat_id, msg)
 
-        if response.status_code == 200:
-            success += 1
-            status = "SUCCESS"
-        else:
-            failed += 1
-            status = "FAILED"
+        try:
+            result = response.json()
 
+            if response.status_code == 200 and result.get("ok"):
+                success += 1
+                status = "SUCCESS"
+            else:
+                failed += 1
+                status = "FAILED"
+
+        except:
+            failed += 1
+            status = "ERROR"
+
+        # ===============================
+        # SAVE LOG
+        # ===============================
         sent_log.append({
             "Date_Time": datetime.now(),
             "Engineer": eng_name,
             "Taluk": taluk,
+            "Tickets_Count": ticket_count,
+            "HTTP_Status": response.status_code,
             "Status": status
         })
 
-        progress.progress((i+1)/len(engineers))
+        progress.progress((i + 1) / total_engineers)
 
+    # ===============================
+    # DISPLAY RESULTS
+    # ===============================
     st.divider()
 
     s1, s2 = st.columns(2)
     s1.metric("✅ Success", success)
     s2.metric("❌ Failed", failed)
 
+    if failed == 0:
+        st.success("🎉 All Engineers Notified Successfully")
+    else:
+        st.warning("⚠ Some Messages Failed. Please Check Log.")
+
     log_df = pd.DataFrame(sent_log)
     st.dataframe(log_df, use_container_width=True)
 
+    # ===============================
+    # DOWNLOAD LOG
+    # ===============================
     output = io.BytesIO()
     log_df.to_excel(output, index=False, engine='openpyxl')
     output.seek(0)
@@ -185,7 +245,6 @@ if send_button and ticket_file and master_file:
     st.download_button(
         label="📥 Download Log File",
         data=output,
-        file_name=f"Sent_Log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        file_name=f"Sent_Log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-    st.success("Process Completed Successfully ✅")
